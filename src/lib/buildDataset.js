@@ -52,6 +52,9 @@ export function emptyStats() {
     engine_versions: {},
     reports_kept: 0,
     reports_dropped_no_rows: 0,
+    reports_dropped_no_date: 0,
+    reports_dropped_duplicate: 0,
+    reports_merged_same_day: 0,
     rows_parsed: 0,
     rows_catalogued: 0,
     rows_uncatalogued: 0,
@@ -105,10 +108,16 @@ export function buildDataset(docs) {
       ) || uploaded
 
     const pid = doc.patient_id
-    if (!pid || !date) continue
+    if (!pid || !date) {
+      stats.reports_dropped_no_date++
+      continue
+    }
 
     const fingerprint = `${pid}|${date}|${rows.length}|${rows[0]?.name}|${rows[0]?.value}`
-    if (seen.has(fingerprint)) continue
+    if (seen.has(fingerprint)) {
+      stats.reports_dropped_duplicate++
+      continue
+    }
     seen.add(fingerprint)
 
     const tests = rows.map((r) => {
@@ -174,7 +183,9 @@ export function buildDataset(docs) {
   const list = [...patients.values()]
   for (const p of list) {
     p.reports.sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    const beforeMerge = p.reports.length
     p.reports = mergeSameDay(p.reports)
+    stats.reports_merged_same_day += beforeMerge - p.reports.length
 
     const series = {}
     for (const r of p.reports)

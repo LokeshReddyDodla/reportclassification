@@ -9,6 +9,7 @@ import DocumentCard from './DocumentCard.jsx'
 import TrendsTab from './TrendsTab.jsx'
 import ReportsTab from './ReportsTab.jsx'
 import UploadPanel from './UploadPanel.jsx'
+import CoverageNote from './CoverageNote.jsx'
 
 export default function ClassifierView({ patient }) {
   const [docs, setDocs] = useState(null)
@@ -138,6 +139,14 @@ export default function ClassifierView({ patient }) {
           stamp {unswept > 1 ? 'them' : 'it'}. Until then {unswept > 1 ? 'they are' : 'it is'} typed
           here by content heuristic instead.
         </p>
+      )}
+
+      {(tab === 'trends' || tab === 'reports') && (
+        <CoverageNote
+          stats={built?.stats}
+          charted={reportCount}
+          onSeeDocuments={() => setTab('documents')}
+        />
       )}
 
       {tab === 'trends' &&
