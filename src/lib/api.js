@@ -119,3 +119,69 @@ export async function listAllDocuments(patientId) {
   }
   return all
 }
+
+/** Formats the backend accepts — anything else is rejected before upload. */
+export const ACCEPTED_UPLOAD_TYPES =
+  '.pdf,.doc,.docx,.csv,.xls,.xlsx,image/*'
+
+/**
+ * Upload documents for a patient.
+ *
+ * Multipart, so Content-Type is left unset — the browser must set it itself to
+ * include the boundary. The backend extracts text, summarises, classifies, and
+ * embeds each file synchronously in the request, which takes several seconds
+ * per file, so the ceiling here is far above the JSON one and scales with the
+ * number of files.
+ *
+ * Uses XHR rather than fetch because fetch cannot report upload progress.
+ */
+export function uploadDocuments(patientId, files, { documentType = 'report', onProgress } = {}) {
+  const form = new FormData()
+  for (const f of files) form.append('files', f, f.name)
+
+  const url = new URL(
+    `${BASE}/care-providers/patients/${encodeURIComponent(patientId)}/documents/upload`,
+    window.location.origin,
+  )
+  url.searchParams.set('document_type', documentType)
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url, true)
+    xhr.timeout = 120000 + files.length * 90000
+    xhr.setRequestHeader('Accept', 'application/json')
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    const device = sessionStorage.getItem(DEVICE_KEY)
+    if (device) xhr.setRequestHeader('x-device-id', device)
+
+    // Progress covers the bytes leaving the browser only. Once they land, the
+    // server still has extraction and two model calls to do per file, so the
+    // UI switches to an indeterminate "processing" state at 100%.
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+    }
+
+    xhr.onload = () => {
+      let data = null
+      try { data = JSON.parse(xhr.responseText) } catch { /* non-JSON error body */ }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(data)
+      if (xhr.status === 401) {
+        clearSession()
+        return reject(new ApiError('Session expired — sign in again.', 401, data))
+      }
+      const detail = data?.detail
+      const message =
+        (typeof detail === 'string' && detail) ||
+        detail?.message ||
+        data?.message ||
+        `Upload failed (HTTP ${xhr.status})`
+      reject(new ApiError(message, xhr.status, data))
+    }
+    xhr.onerror = () => reject(new ApiError('Could not reach the API.', 0, null))
+    xhr.ontimeout = () =>
+      reject(new ApiError('The upload timed out. Try fewer files at once.', 0, null))
+
+    xhr.send(form)
+  })
+}

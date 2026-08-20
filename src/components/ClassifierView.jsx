@@ -8,6 +8,7 @@ import PanelBars from './PanelBars.jsx'
 import DocumentCard from './DocumentCard.jsx'
 import TrendsTab from './TrendsTab.jsx'
 import ReportsTab from './ReportsTab.jsx'
+import UploadPanel from './UploadPanel.jsx'
 
 export default function ClassifierView({ patient }) {
   const [docs, setDocs] = useState(null)
@@ -15,6 +16,7 @@ export default function ClassifierView({ patient }) {
   const [tab, setTab] = useState('trends')
   const [typeFilter, setTypeFilter] = useState('all')
   const [panelFilter, setPanelFilter] = useState(null)
+  const [reloads, setReloads] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -26,7 +28,7 @@ export default function ClassifierView({ patient }) {
     return () => {
       alive = false
     }
-  }, [patient.id])
+  }, [patient.id, reloads])
 
   const stats = useMemo(() => {
     if (!docs) return null
@@ -114,6 +116,8 @@ export default function ClassifierView({ patient }) {
           )}
         </div>
       </header>
+
+      <UploadPanel patient={patient} onUploaded={() => setReloads((n) => n + 1)} />
 
       <div className="seg tabs">
         <button className="btn" aria-pressed={tab === 'trends'} onClick={() => setTab('trends')}>
