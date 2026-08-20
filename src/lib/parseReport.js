@@ -161,15 +161,24 @@ const looksLikeName = (n) => {
     .replace(/\b(non|and|or|in|of|for|with|the|to|at|by|serum|plasma|blood|urine)\b/gi, ' ')
     .replace(/[^A-Za-z]/g, '')
   if (residue.length < 3) return false
-  // An embedded value ("Yeast 0.00 /hpf") means the row split in the wrong place.
-  if (/\d+\.?\d*\s*(?:\/|[A-Za-zµμ%])/.test(s)) return false
+  // An embedded value ("Yeast 0.00 /hpf") means the row split in the wrong
+  // place. The digits must be their own token to count: analyte names legitimately
+  // glue digits into a word -- HbA1c, B12, 25-OH -- and rejecting those dropped
+  // HbA1c, of all things, from every report it appeared in.
+  if (/(?:^|\s)\d+\.?\d*\s*(?:\/|[A-Za-zµμ%])/.test(s)) return false
   if ((s.match(/\d/g) || []).length > 4) return false
   if (/[©®™]|(.)\1{3,}/.test(s)) return false // OCR garble: "ssuuppppoorrtt"
   return true
 }
 
 // Leading "/" covers per-volume units the labs write bare: /hpf, /cumm, /µL.
-const UNIT = String.raw`\/?[A-Za-zµμ%][A-Za-z0-9µμ%^/³²·.\-]{0,16}`
+// The trailing group covers units the labs write with an internal space --
+// "288 x 10^3/µL" -- which otherwise stop the match dead at "x".
+// The first branch covers per-volume counts written starting with the power
+// itself -- "310 10³/µL" -- which the letter-initial branch cannot begin to
+// match. The trailing group on that branch covers the same unit written with an
+// internal space, "288 x 10^3/µL", which otherwise stops the match dead at "x".
+const UNIT = String.raw`(?:\d+(?:\^\d+)?[³²]?\s*\/\s*[A-Za-zµμ]+|\/?[A-Za-zµμ%][A-Za-z0-9µμ%^/³²·.\-]{0,16}(?:\s[A-Za-z0-9µμ%^/³²·.\-]{1,12})?)`
 
 // Several labs put a specimen or method column *after* the reference interval
 // ("SGOT(AST) 23 U/L 10-50 Serum"), so the range is not always line-final.
@@ -219,7 +228,11 @@ function rowsFromRaw(text) {
 function rowsFromSummary(text) {
   const out = []
   const re = new RegExp(
-    String.raw`[-*]\s+\*{0,2}([^*:\n]{3,58}?)\*{0,2}\s*:\s*\*{0,2}(-?\d+\.?\d*)\*{0,2}\s*(${UNIT})?\s*\(([^)]{2,90})\)`,
+    // The summariser emits two bullet shapes, differing in where the colon sits
+    // relative to the bold markers: `**Name**: 15.5` and `**Name:** 16.5`. The
+    // second puts a space between the closing `**` and the value, which fails
+    // the match outright unless whitespace is allowed after those markers.
+    String.raw`[-*]\s+\*{0,2}([^*:\n]{3,58}?)\s*\*{0,2}\s*:\s*\*{0,2}\s*(-?\d+\.?\d*)\*{0,2}\s*(${UNIT})?\s*\(([^)]{2,90})\)`,
     'g'
   )
   let m
@@ -228,7 +241,10 @@ function rowsFromSummary(text) {
     // "(Reference Range: 0.35 - 4.94, **Low**)" → keep just the interval
     const inner = m[4]
       .replace(/\*/g, '')
-      .replace(/^(reference\s*(range|interval)|reference|normal|ref)\s*[:\-]?\s*/i, '')
+      // Three lead-ins seen in the wild: "Reference Range:", "Reference:" and
+      // "Ref." -- the abbreviation's full stop has to count as a separator or
+      // it survives the strip and the interval fails to parse.
+      .replace(/^(reference\s*(range|interval|value)?|normal|ref)\s*[:.\-]?\s*/i, '')
       .replace(/,\s*(low|high|normal|elevated|decreased|deficient|borderline|abnormal)\s*$/i, '')
       .trim()
     const ref = parseRef(inner) || parseRef(inner.split(',')[0].trim())
