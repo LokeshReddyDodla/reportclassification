@@ -1,27 +1,45 @@
-# Lab Report Classifier UI
+# Lab Report Classifier
 
-A care-provider dashboard for the **rule-based document classifier** in
-`aihealth-server` (`lib/services/document_classification`). It shows each
-patient's uploaded documents sorted by the classifier: lab reports (with
-multi-label panel subtypes), radiology, other documents, and anything the
-sweep hasn't stamped yet — including the per-document evidence trail
-(anchors matched, result lines, confidence, engine version).
+A care-provider dashboard for patient documents in `aihealth-server`. It reads
+the classification the backend stamps on every document
+(`lib/services/document_classification`), then charts the lab results inside the
+documents it identifies as lab reports.
 
-## How it works
+## Three views
 
-- Sign in with a care-provider account
-  (`POST /v1/auth/care-provider/email-login`).
-- Search patients (`GET /care-providers/patients?search=`).
-- Fetch all their documents
-  (`GET /care-providers/patients/{id}/documents`) — the response includes
-  the `classification` field stamped by
-  `scripts/classify_patient_documents.py --write`; no extra backend
-  endpoints are needed.
-- Filtering by doc type / panel happens client-side on that field.
+- **Trends** — every analyte with at least two dated results, pooled across all
+  of a patient's lab reports. Flagged analytes first, then furthest outside
+  their interval, then most-moved. The shaded band is the reference interval
+  from the most recent report.
+- **Reports** — one report at a time: results against their reference intervals,
+  searchable, filterable by panel, panel or table layout.
+- **Documents** — the classifier's own output: doc-type counts, multi-label
+  panel distribution, and the per-document evidence trail (anchors matched,
+  confidence, engine version).
 
-Requests go to the relative path `/api/…`, proxied by Vite to the backend
-— the browser stays same-origin, so **no CORS change is ever needed
-server-side**.
+## Where the numbers come from
+
+Two independent layers, deliberately:
+
+1. **Document type** comes from the backend. The engine classifies from the full
+   `text_raw` at upload — which the documents endpoint strips from list
+   responses — so the server has seen more of the document than this client
+   ever will, and its verdict wins (`docKind` in `src/lib/buildDataset.js`).
+   A content heuristic (`classify` in `src/lib/parseReport.js`) is the fallback
+   for documents the sweep has not stamped yet, so nothing disappears from the
+   UI while a backfill is pending.
+
+2. **Analyte values** are recovered client-side. The stored documents hold
+   LLM-extracted *text*, not structured results, so every value is parsed by
+   pattern (`parseReport.js`), folded onto canonical analytes across labs
+   (`testCatalog.js`), and assembled into the render shape (`buildDataset.js`).
+   A row appears only when both a value and a reference interval parse —
+   nothing is estimated. Low/normal/high is derived at render time from
+   value + interval, never stored, so correcting an interval re-flags every
+   historical report.
+
+The value parser, catalog, status logic, and trend components are shared with
+the `labreport_dash` project.
 
 ## Run
 
@@ -31,11 +49,20 @@ npm run dev            # http://localhost:5181, proxies to https://api.aihealth.
 AIH_API=http://localhost:8000 npm run dev   # point at a local backend instead
 ```
 
+Requests go to the relative path `/api/…`, proxied by Vite to the backend — the
+browser stays same-origin, so **no CORS change is ever needed server-side**.
+
 ## Notes
 
-- Documents without a `classification` field show as "Not classified yet"
-  with a hint to run the sweep.
-- Panel counts are multi-label: one health-package PDF can carry CBC +
-  LFT + lipid + thyroid at once, so panel counts can exceed the
-  lab-report total.
+- New uploads are classified in the ingest flow, before the document reaches
+  Mongo. Documents that predate that are stamped by the backfill sweep
+  (`scripts/classify_patient_documents.py --write`); until it runs they show as
+  "not classified by the backend yet" and fall back to the content heuristic.
+- Panel counts are multi-label: one health-package PDF can carry CBC + LFT +
+  lipid + thyroid at once, so panel counts can exceed the lab-report total.
+- The documents endpoint returns `summary_text` only, and many labs summarise
+  just the abnormals — reports built that way are marked "Summary only" and
+  may be partial.
+- Trends need the same analyte on two dated reports. A patient with one report
+  gets a note and a link to the report, not an empty grid.
 - The auth token lives in sessionStorage and clears when the tab closes.
